@@ -179,7 +179,7 @@ def _close_window_safe(win: Any) -> None:
 # ==============================================================================
 
 MOD_NAME = "Advanced Chat Version Dark"
-MOD_VERSION = "1.0.6"
+MOD_VERSION = "1.0.7"
 TELEMETRY_WEBHOOK = "https://discord.com/api/webhooks/1574892129828995244/2U_MtUTIr8_xfKORUC7NiR-cOF9A_YQ5FJWtZQeHRMp5CADHqPxxit7dyOL1lH7kKy4P"
 AUTO_UPDATE_URL = "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/version.json"
 
@@ -4162,6 +4162,7 @@ class ServerPlayersWindow:
                     local_name = str(classic.accounts.get_active_player_name() or '')
 
             for entry in roster:
+                client_id = entry.get('client_id', 0)
                 pbid = str(entry.get('account_id') or '')
                 disp = str(entry.get('display_string') or 'Unknown')
                 players = entry.get('players') or []
@@ -4174,11 +4175,18 @@ class ServerPlayersWindow:
                 if is_local and local_pbid:
                     pbid = local_pbid
 
+                is_host = (client_id == -1)
                 is_valid_pb = pbid.startswith('pb-') and len(pbid) >= 8 and pbid != 'pb-v2'
-                sub_txt = pbid if is_valid_pb else 'No PBID (Local / Guest)'
-                row_label = f'{player_label}   [{sub_txt}]'
 
-                btn_color = (0.24, 0.45, 0.34) if is_valid_pb else (0.35, 0.35, 0.38)
+                if is_host:
+                    sub_txt = f'Host Server ({pbid})' if is_valid_pb else 'Host Server'
+                    row_label = f'{player_label} (Host)   [{sub_txt}]'
+                    btn_color = (0.28, 0.38, 0.52)
+                else:
+                    sub_txt = pbid if is_valid_pb else 'No PBID (Local / Guest)'
+                    row_label = f'{player_label}   [{sub_txt}]'
+                    btn_color = (0.24, 0.45, 0.34) if is_valid_pb else (0.35, 0.35, 0.38)
+
                 bui.buttonwidget(
                     parent=self._col,
                     size=(scroll_w - 28, 44),
