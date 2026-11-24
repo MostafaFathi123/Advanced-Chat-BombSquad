@@ -1,6 +1,6 @@
 {
-  "version": "1.0.3",
-  "changelog": "Added _play_swish audio helper, official V2 PBID resolution via primary account handle, and custom Discord V2 emoji branding.",
+  "version": "1.0.4",
+  "changelog": "Clean Linked Accounts and Recent Searches styling, and direct Auto-Translate and PBID popup menu options for party members.",
   "download_url_api8": "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/Advanced_chat_version_dark_api8.py",
   "download_url_api9": "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/Advanced_chat_version_dark_api9.py"
 }

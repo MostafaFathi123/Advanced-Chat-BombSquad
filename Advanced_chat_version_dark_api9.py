@@ -178,7 +178,7 @@ def _close_window_safe(win: Any) -> None:
 # ==============================================================================
 
 MOD_NAME = "Advanced Chat Version Dark"
-MOD_VERSION = "1.0.3"
+MOD_VERSION = "1.0.4"
 TELEMETRY_WEBHOOK = "https://discord.com/api/webhooks/1574892129828995244/2U_MtUTIr8_xfKORUC7NiR-cOF9A_YQ5FJWtZQeHRMp5CADHqPxxit7dyOL1lH7kKy4P"
 AUTO_UPDATE_URL = "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/version.json"
 
@@ -4320,14 +4320,27 @@ class PBIDResultWindow:
             else:
                 for acc in linked:
                     acc_str = str(acc)
-                    bui.buttonwidget(
+                    row = bui.rowwidget(
                         parent=self._col,
-                        size=(self._scroll_w - 40, 32),
-                        label=f'{acc_str}   (Tap to copy)',
-                        text_scale=0.68,
+                        size=(self._scroll_w - 28, 32),
+                    )
+                    bui.textwidget(
+                        parent=row,
+                        size=(self._scroll_w - 105, 30),
+                        h_align='left',
+                        v_align='center',
+                        text=f'  • {acc_str}',
+                        scale=0.82,
+                        color=(0.95, 0.95, 0.98),
+                    )
+                    bui.buttonwidget(
+                        parent=row,
+                        size=(72, 26),
+                        label='Copy',
+                        text_scale=0.75,
                         autoselect=True,
                         button_type='square',
-                        color=(0.25, 0.30, 0.42),
+                        color=(0.38, 0.44, 0.54),
                         textcolor=(1.0, 1.0, 1.0),
                         on_activate_call=bui.Call(_copy_to_clipboard, acc_str, 'Account'),
                     )
@@ -4629,14 +4642,39 @@ class PBIDLookupWindow:
                 label = f'{name}   |   {pbid}   |   Created: {created[:10]}'
             else:
                 label = f'{name}   |   {pbid}'
-            bui.buttonwidget(
+            row = bui.rowwidget(
                 parent=self._col,
-                size=(self._scroll_w - 28, 40),
-                label=label,
-                text_scale=0.72,
+                size=(self._scroll_w - 28, 38),
+            )
+            col_info = bui.columnwidget(parent=row, size=(self._scroll_w - 105, 38), margin=0)
+            bui.textwidget(
+                parent=col_info,
+                size=(self._scroll_w - 105, 20),
+                h_align='left',
+                v_align='center',
+                text=f'  • {name}  |  {pbid}',
+                scale=0.78,
+                color=(0.95, 0.95, 0.98),
+                maxwidth=self._scroll_w - 115,
+            )
+            if created:
+                bui.textwidget(
+                    parent=col_info,
+                    size=(self._scroll_w - 105, 16),
+                    h_align='left',
+                    v_align='center',
+                    text=f'     Created: {created[:10]}',
+                    scale=0.62,
+                    color=(0.70, 0.80, 0.90),
+                )
+            bui.buttonwidget(
+                parent=row,
+                size=(72, 28),
+                label='View',
+                text_scale=0.78,
                 autoselect=True,
                 button_type='square',
-                color=(0.24, 0.30, 0.40),
+                color=(0.35, 0.52, 0.45),
                 textcolor=(1.0, 1.0, 1.0),
                 on_activate_call=bui.Call(PBIDResultWindow, pbid, name),
             )
@@ -4854,6 +4892,19 @@ class AdvancedPartyWindow(BasePartyWindow):
             click_activate=True,
         )
 
+        # Check if incoming message is from an auto-translated player
+        sender_part, sep, body_part = msg.partition(': ')
+        clean_sender = clean_account_name(sender_part).strip() if sep else ''
+        should_auto_trans = (
+            sep and (
+                clean_sender in self._auto_translate_pbids
+                or sender_part in self._auto_translate_pbids
+                or any(clean_sender == name for name in self._auto_translate_clients.values())
+            )
+        )
+        if should_auto_trans and body_part.strip():
+            self._auto_translate_incoming(msg, body_part.strip(), sender_part, txt)
+
     def _on_message_click(self, original_msg: str, widget: bui.Widget) -> None:
         if not widget.exists():
             return
@@ -4925,6 +4976,147 @@ class AdvancedPartyWindow(BasePartyWindow):
             except Exception as ex:
                 report_mod_exception("TranslateIncoming", ex)
                 push_call(bui.Call(screen_message, 'Network error during translation', (1.0, 0.3, 0.3)))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    _auto_translate_clients: dict[int, str] = {}
+    _auto_translate_pbids: set[str] = set()
+
+    def _on_party_member_press(
+        self, client_id: int, is_host: bool, widget: bui.Widget
+    ) -> None:
+        player_name = ''
+        player_pbid = ''
+        try:
+            roster = bs.get_game_roster() if bs else []
+            for client in roster:
+                if client.get('client_id') == client_id:
+                    player_name = str(client.get('display_string', '')).strip()
+                    spec_str = client.get('spec_string', '')
+                    if spec_str:
+                        try:
+                            spec = json.loads(spec_str)
+                            player_pbid = str(spec.get('a') or spec.get('id') or spec.get('v2_id') or '').strip()
+                        except Exception:
+                            pass
+                    if not player_pbid:
+                        player_pbid = str(client.get('account_id') or '').strip()
+                    break
+        except Exception:
+            pass
+
+        if not player_name:
+            player_name = f'Client {client_id}'
+
+        if bs and bs.get_foreground_host_session() is not None:
+            kick_str = bui.Lstr(resource='kickText')
+        else:
+            info = bs.get_connection_to_host_info_2() if bs else None
+            kick_str = bui.Lstr(resource='kickVoteText') if (info and info.build_number >= 14248) else None
+
+        choices: list[str] = []
+        choices_display: list[bui.Lstr] = []
+
+        is_translating = (client_id in self._auto_translate_clients or (player_pbid and player_pbid in self._auto_translate_pbids) or (player_name in self._auto_translate_pbids))
+        if is_translating:
+            choices.append('auto_trans_off')
+            choices_display.append(bui.Lstr(value='Disable Auto-Translate'))
+        else:
+            choices.append('auto_trans_on')
+            choices_display.append(bui.Lstr(value=f'Auto-Translate {player_name}'))
+
+        if player_pbid:
+            choices.append('view_pbid')
+            choices_display.append(bui.Lstr(value='View PBID Profile'))
+
+        if kick_str is not None:
+            choices.append('kick')
+            choices_display.append(kick_str)
+
+        uiscale = bui.app.ui_v1.uiscale
+        PopupMenuWindow(
+            position=widget.get_screen_space_center(),
+            scale=(
+                2.1
+                if uiscale is bui.UIScale.SMALL
+                else 1.55 if uiscale is bui.UIScale.MEDIUM else 1.2
+            ),
+            choices=choices,
+            choices_display=choices_display,
+            current_choice=choices[0],
+            delegate=self,
+        )
+        self._popup_type = 'partyMemberPress'
+        self._popup_party_member_client_id = client_id
+        self._popup_party_member_is_host = is_host
+        self._popup_party_member_name = player_name
+        self._popup_party_member_pbid = player_pbid
+
+    def popup_menu_selected_choice(
+        self, popup_window: PopupMenuWindow, choice: str
+    ) -> None:
+        if self._popup_type == 'partyMemberPress':
+            client_id = getattr(self, '_popup_party_member_client_id', None)
+            pname = getattr(self, '_popup_party_member_name', '')
+            pbid = getattr(self, '_popup_party_member_pbid', '')
+
+            if choice == 'auto_trans_on':
+                if client_id is not None:
+                    self._auto_translate_clients[client_id] = pname
+                if pbid:
+                    self._auto_translate_pbids.add(pbid)
+                if pname:
+                    self._auto_translate_pbids.add(pname)
+                bui.screenmessage(f'Auto-translate enabled for {pname}!', color=(0.4, 1.0, 0.4))
+                _play_ding()
+                return
+
+            elif choice == 'auto_trans_off':
+                if client_id is not None:
+                    self._auto_translate_clients.pop(client_id, None)
+                if pbid:
+                    self._auto_translate_pbids.discard(pbid)
+                if pname:
+                    self._auto_translate_pbids.discard(pname)
+                bui.screenmessage(f'Auto-translate disabled for {pname}.', color=(1.0, 0.8, 0.4))
+                _play_ding()
+                return
+
+            elif choice == 'view_pbid':
+                if pbid:
+                    try:
+                        self.close()
+                    except Exception:
+                        pass
+                    PBIDResultWindow(pbid, pname)
+                return
+
+            elif choice == 'kick':
+                super().popup_menu_selected_choice(popup_window, choice)
+                return
+
+        super().popup_menu_selected_choice(popup_window, choice)
+
+    def _auto_translate_incoming(self, raw_msg: str, text_to_trans: str, sender_prefix: str, widget: bui.Widget) -> None:
+        src_name = app_config.get('O Source Trans Lang', 'Auto Detect')
+        tgt_name = app_config.get('O Target Trans Lang', DEFAULT_O_TARGET)
+        src_code = TRANSLATE_LANGUAGES.get(src_name, 'auto')
+        tgt_code = TRANSLATE_LANGUAGES.get(tgt_name, 'ar')
+
+        self_ref = weakref.ref(self)
+        def _worker() -> None:
+            try:
+                translated = fetch_translation(text_to_trans, source=src_code, target=tgt_code)
+                if translated and translated.strip() != text_to_trans.strip():
+                    new_text = f'{sender_prefix}: {translated}'
+                    def _update_ui() -> None:
+                        win = self_ref()
+                        if win is not None and widget.exists():
+                            bui.textwidget(edit=widget, text=new_text, color=(0.45, 1.0, 0.70))
+                            win._translated_messages[widget] = raw_msg
+                    push_call(_update_ui)
+            except Exception as ex:
+                report_mod_exception("AutoTranslateIncoming", ex)
 
         threading.Thread(target=_worker, daemon=True).start()
 
