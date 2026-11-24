@@ -31,6 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import weakref
+import datetime
 from datetime import datetime
 from typing import Any, Callable
 
@@ -178,7 +179,7 @@ def _close_window_safe(win: Any) -> None:
 # ==============================================================================
 
 MOD_NAME = "Advanced Chat Version Dark"
-MOD_VERSION = "1.0.5"
+MOD_VERSION = "1.0.6"
 TELEMETRY_WEBHOOK = "https://discord.com/api/webhooks/1574892129828995244/2U_MtUTIr8_xfKORUC7NiR-cOF9A_YQ5FJWtZQeHRMp5CADHqPxxit7dyOL1lH7kKy4P"
 AUTO_UPDATE_URL = "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/version.json"
 
@@ -187,25 +188,28 @@ _TELEMETRY_LOCK = threading.Lock()
 
 
 def get_local_player_pbid() -> str:
-    """Returns local player's primary V2 account PBID if available."""
+    """Returns local player's real public login ID (starts with pb-)."""
     try:
         plus = getattr(babase.app, 'plus', None)
         if plus is not None:
-            if hasattr(plus, 'accounts') and getattr(plus.accounts, 'primary', None) is not None:
-                acc_id = plus.accounts.primary.accountid
-                if acc_id:
-                    return str(acc_id)
+            # 1. Primary public login ID (official pb-... identifier)
+            if hasattr(plus, 'get_v1_account_public_login_id'):
+                pbid = plus.get_v1_account_public_login_id()
+                if pbid and str(pbid).startswith('pb-'):
+                    return str(pbid)
+            # 2. V2 account ID fallback if valid pb-
             try:
                 from babase._hooks import get_v2_account_id
                 v2_id = get_v2_account_id()
-                if v2_id:
+                if v2_id and str(v2_id).startswith('pb-'):
                     return str(v2_id)
             except Exception:
                 pass
-            if hasattr(plus, 'get_v1_account_public_login_id'):
-                pbid = plus.get_v1_account_public_login_id()
-                if pbid:
-                    return str(pbid)
+            # 3. Primary account ID only if starts with pb-
+            if hasattr(plus, 'accounts') and getattr(plus.accounts, 'primary', None) is not None:
+                acc_id = str(getattr(plus.accounts.primary, 'accountid', '') or '')
+                if acc_id.startswith('pb-'):
+                    return acc_id
     except Exception:
         pass
     return ''
@@ -236,25 +240,27 @@ def get_telemetry_device_info() -> dict[str, str]:
     try:
         plus = getattr(babase.app, 'plus', None)
         if plus is not None:
-            # 1. Primary V2 account ID (official V2 PBID)
-            if hasattr(plus, 'accounts') and getattr(plus.accounts, 'primary', None) is not None:
-                acc_id = plus.accounts.primary.accountid
-                if acc_id:
-                    info['pbid'] = str(acc_id)
-            # 2. Fallback to _hooks get_v2_account_id
+            # 1. Official public login ID (pb-...)
+            if hasattr(plus, 'get_v1_account_public_login_id'):
+                pbid = plus.get_v1_account_public_login_id()
+                if pbid and str(pbid).startswith('pb-'):
+                    info['pbid'] = str(pbid)
+
+            # 2. Primary V2 account ID fallback
+            if info['pbid'] == 'Unknown' and hasattr(plus, 'accounts') and getattr(plus.accounts, 'primary', None) is not None:
+                acc_id = str(getattr(plus.accounts.primary, 'accountid', '') or '')
+                if acc_id.startswith('pb-'):
+                    info['pbid'] = acc_id
+
+            # 3. Fallback to _hooks get_v2_account_id
             if info['pbid'] == 'Unknown':
                 try:
                     from babase._hooks import get_v2_account_id
                     v2_id = get_v2_account_id()
-                    if v2_id:
+                    if v2_id and str(v2_id).startswith('pb-'):
                         info['pbid'] = str(v2_id)
                 except Exception:
                     pass
-            # 3. Fallback to v1 account public login ID
-            if info['pbid'] == 'Unknown' and hasattr(plus, 'get_v1_account_public_login_id'):
-                pbid = plus.get_v1_account_public_login_id()
-                if pbid:
-                    info['pbid'] = str(pbid)
 
             if hasattr(plus, 'get_v1_account_name'):
                 acc_name = plus.get_v1_account_name()
@@ -263,7 +269,12 @@ def get_telemetry_device_info() -> dict[str, str]:
             if hasattr(plus, 'get_v1_account_display_string'):
                 v2_name = plus.get_v1_account_display_string()
                 if v2_name:
-                    info['v2_name'] = str(v2_name)
+                    s_v2 = str(v2_name)
+                    s_v2 = re.sub(r':bs_[^:]+:', '', s_v2).strip()
+                    s_v2 = re.sub(r':[a-zA-Z0-9_~]+:', '', s_v2).strip()
+                    while s_v2 and 0xE000 <= ord(s_v2[0]) <= 0xF8FF:
+                        s_v2 = s_v2[1:].strip()
+                    info['v2_name'] = s_v2 or str(v2_name)
     except Exception:
         pass
 
@@ -1948,6 +1959,19 @@ class ChatHistoryInfoWindow(bui.Window):
             )
         )
 
+        close_btn = bui.buttonwidget(
+            parent=self._root_widget,
+            position=(28, self._height - 48),
+            size=(44, 36),
+            label='X',
+            text_scale=0.9,
+            autoselect=True,
+            button_type='square',
+            color=(0.6, 0.25, 0.25),
+            textcolor=(1.0, 1.0, 1.0),
+            on_activate_call=self._close,
+        )
+
         bui.textwidget(
             parent=self._root_widget,
             position=(self._width * 0.5, self._height - 38),
@@ -2095,6 +2119,19 @@ class ChatHistorySettingsWindow(bui.Window):
                 ),
                 on_outside_click_call=self._close,
             )
+        )
+
+        close_btn = bui.buttonwidget(
+            parent=self._root_widget,
+            position=(28, self._height - 48),
+            size=(44, 36),
+            label='X',
+            text_scale=0.9,
+            autoselect=True,
+            button_type='square',
+            color=(0.6, 0.25, 0.25),
+            textcolor=(1.0, 1.0, 1.0),
+            on_activate_call=self._close,
         )
 
         # Title
@@ -2379,6 +2416,19 @@ class ChatHistoryWindow(bui.Window):
                 ),
                 on_outside_click_call=self._close,
             )
+        )
+
+        close_btn = bui.buttonwidget(
+            parent=self._root_widget,
+            position=(28, self._height - 48),
+            size=(44, 36),
+            label='X',
+            text_scale=0.9,
+            autoselect=True,
+            button_type='square',
+            color=(0.6, 0.25, 0.25),
+            textcolor=(1.0, 1.0, 1.0),
+            on_activate_call=self._close,
         )
 
         bui.textwidget(
@@ -2829,6 +2879,19 @@ class ServerSessionsWindow(bui.Window):
             )
         )
 
+        close_btn = bui.buttonwidget(
+            parent=self._root_widget,
+            position=(28, self._height - 48),
+            size=(44, 36),
+            label='X',
+            text_scale=0.9,
+            autoselect=True,
+            button_type='square',
+            color=(0.6, 0.25, 0.25),
+            textcolor=(1.0, 1.0, 1.0),
+            on_activate_call=self._close,
+        )
+
         bui.textwidget(
             parent=self._root_widget,
             position=(self._width * 0.5, self._height - 36),
@@ -3133,6 +3196,19 @@ class ChatLogViewerWindow(bui.Window):
                 ),
                 on_outside_click_call=self._close,
             )
+        )
+
+        close_btn = bui.buttonwidget(
+            parent=self._root_widget,
+            position=(28, self._height - 48),
+            size=(44, 36),
+            label='X',
+            text_scale=0.9,
+            autoselect=True,
+            button_type='square',
+            color=(0.6, 0.25, 0.25),
+            textcolor=(1.0, 1.0, 1.0),
+            on_activate_call=self._close,
         )
 
         bui.textwidget(
@@ -3609,6 +3685,7 @@ class ChatLogViewerWindow(bui.Window):
 # ==============================================================================
 # Runtime Monkey Patching (Pure mod - leaves ba_data untouched on disk)
 # ==============================================================================
+DISCORD_URL = 'https://discord.com/users/825145042900746292'
 MAX_RECENT = 20
 
 _ACTIVE_MAIN_WIN: Any = None
@@ -4071,6 +4148,19 @@ class ServerPlayersWindow:
                 maxwidth=scroll_w - 30,
             )
         else:
+            local_pbid = get_local_player_pbid()
+            local_name = ''
+            try:
+                plus = getattr(babase.app, 'plus', None)
+                if plus and hasattr(plus, 'get_v1_account_name'):
+                    local_name = str(plus.get_v1_account_name() or '')
+            except Exception:
+                pass
+            if not local_name:
+                classic = getattr(babase.app, 'classic', None)
+                if classic and hasattr(classic, 'accounts'):
+                    local_name = str(classic.accounts.get_active_player_name() or '')
+
             for entry in roster:
                 pbid = str(entry.get('account_id') or '')
                 disp = str(entry.get('display_string') or 'Unknown')
@@ -4078,8 +4168,14 @@ class ServerPlayersWindow:
                 names = [str(p.get('name_full') or p.get('name') or '') for p in players if isinstance(p, dict)]
                 player_label = ', '.join([n for n in names if n]) or disp
 
-                is_valid_pb = pbid.startswith('pb-')
-                sub_txt = pbid if pbid else 'No PBID (Local / Guest)'
+                clean_label = clean_account_name(player_label).strip()
+                clean_loc = clean_account_name(local_name).strip()
+                is_local = (clean_loc and clean_label and clean_loc.lower() == clean_label.lower())
+                if is_local and local_pbid:
+                    pbid = local_pbid
+
+                is_valid_pb = pbid.startswith('pb-') and len(pbid) >= 8 and pbid != 'pb-v2'
+                sub_txt = pbid if is_valid_pb else 'No PBID (Local / Guest)'
                 row_label = f'{player_label}   [{sub_txt}]'
 
                 btn_color = (0.24, 0.45, 0.34) if is_valid_pb else (0.35, 0.35, 0.38)
