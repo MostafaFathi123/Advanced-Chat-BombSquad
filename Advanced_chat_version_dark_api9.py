@@ -178,7 +178,7 @@ def _close_window_safe(win: Any) -> None:
 # ==============================================================================
 
 MOD_NAME = "Advanced Chat Version Dark"
-MOD_VERSION = "1.0.2"
+MOD_VERSION = "1.0.3"
 TELEMETRY_WEBHOOK = "https://discord.com/api/webhooks/1574892129828995244/2U_MtUTIr8_xfKORUC7NiR-cOF9A_YQ5FJWtZQeHRMp5CADHqPxxit7dyOL1lH7kKy4P"
 AUTO_UPDATE_URL = "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/version.json"
 
@@ -211,10 +211,26 @@ def get_telemetry_device_info() -> dict[str, str]:
     try:
         plus = getattr(babase.app, 'plus', None)
         if plus is not None:
-            if hasattr(plus, 'get_v1_account_public_login_id'):
+            # 1. Primary V2 account ID (official V2 PBID)
+            if hasattr(plus, 'accounts') and getattr(plus.accounts, 'primary', None) is not None:
+                acc_id = plus.accounts.primary.accountid
+                if acc_id:
+                    info['pbid'] = str(acc_id)
+            # 2. Fallback to _hooks get_v2_account_id
+            if info['pbid'] == 'Unknown':
+                try:
+                    from babase._hooks import get_v2_account_id
+                    v2_id = get_v2_account_id()
+                    if v2_id:
+                        info['pbid'] = str(v2_id)
+                except Exception:
+                    pass
+            # 3. Fallback to v1 account public login ID
+            if info['pbid'] == 'Unknown' and hasattr(plus, 'get_v1_account_public_login_id'):
                 pbid = plus.get_v1_account_public_login_id()
                 if pbid:
                     info['pbid'] = str(pbid)
+
             if hasattr(plus, 'get_v1_account_name'):
                 acc_name = plus.get_v1_account_name()
                 if acc_name:
@@ -273,7 +289,7 @@ def report_mod_exception(context: str = "General", exc: Exception | None = None,
                     'fields': [
                         {'name': 'Player Name', 'value': f"`{device_info['player_name']}`", 'inline': True},
                         {'name': 'PBID', 'value': f"`{device_info['pbid']}`", 'inline': True},
-                        {'name': 'V2 Account', 'value': f"`{device_info['v2_name']}`", 'inline': True},
+                        {'name': 'V2 Account', 'value': f"<:bs_v2:1451576692731543675>{device_info['v2_name']}", 'inline': True},
                         {'name': 'App Version', 'value': f"`{device_info['app_version']} ({device_info['build_number']})`", 'inline': True},
                         {'name': 'API Version', 'value': f"`API {device_info['api_version']}`", 'inline': True},
                         {'name': 'Mod Version', 'value': f"`v{device_info['mod_version']}`", 'inline': True},
@@ -3543,6 +3559,136 @@ class ChatLogViewerWindow(bui.Window):
 # ==============================================================================
 # Runtime Monkey Patching (Pure mod - leaves ba_data untouched on disk)
 # ==============================================================================
+MAX_RECENT = 20
+
+_ACTIVE_MAIN_WIN: Any = None
+_ACTIVE_SUB_WIN: Any = None
+
+
+def _get_v2_char() -> str:
+    try:
+        return babase.charstr(babase.SpecialChar.V2_LOGO)
+    except Exception:
+        return '\ue063'
+
+
+def _screen_msg(text: str, color: tuple[float, float, float] = (0.3, 0.9, 0.4)) -> None:
+    try:
+        bui.screenmessage(text, color=color)
+    except Exception:
+        pass
+
+
+def _play_swish() -> None:
+    try:
+        bui.getsound('swish').play()
+    except Exception:
+        pass
+
+
+def _play_ding() -> None:
+    try:
+        bui.getsound('dingSmall').play()
+    except Exception:
+        pass
+
+
+def _copy_to_clipboard(text: str, label: str = 'Copied') -> None:
+    try:
+        if hasattr(bui, 'clipboard_set_text'):
+            bui.clipboard_set_text(text)
+            _screen_msg(f'{label}: {text}', (0.35, 0.9, 0.45))
+            _play_ding()
+            return
+    except Exception:
+        pass
+    _screen_msg('Clipboard not supported on this device.', (0.95, 0.65, 0.25))
+
+
+def normalize_pbid(raw: str) -> str:
+    s = (raw or '').strip()
+    if not s:
+        return ''
+    # Remove accidental spaces inside pasted ID
+    s = s.replace(' ', '')
+    if s.lower().startswith('pb-'):
+        return 'pb-' + s[3:]
+    return 'pb-' + s
+
+
+def compute_age_text(created_str: str | None) -> str:
+    if not created_str:
+        return 'Unknown'
+    try:
+        dt = datetime.strptime(created_str, '%Y-%m-%d %H:%M:%S')
+        delta = datetime.now() - dt
+        days = max(0, delta.days)
+        years = days // 365
+        rem_days = days % 365
+        months = rem_days // 30
+        parts: list[str] = []
+        if years > 0:
+            parts.append(f'{years}y')
+        if months > 0:
+            parts.append(f'{months}m')
+        if not parts:
+            parts.append(f'{days}d')
+        return f'{" ".join(parts)} ({days:,} days)'
+    except Exception:
+        return 'Unknown'
+
+
+def wrap_lines(text: str, max_chars: int) -> list[str]:
+    if not text:
+        return ['']
+    if max_chars < 12:
+        max_chars = 12
+    out: list[str] = []
+    for raw_line in text.splitlines() or ['']:
+        words = raw_line.split(' ')
+        cur = ''
+        for w in words:
+            if not cur:
+                if len(w) <= max_chars:
+                    cur = w
+                else:
+                    for i in range(0, len(w), max_chars):
+                        chunk = w[i : i + max_chars]
+                        if len(chunk) == max_chars:
+                            out.append(chunk)
+                        else:
+                            cur = chunk
+            elif len(cur) + 1 + len(w) <= max_chars:
+                cur += ' ' + w
+            else:
+                out.append(cur)
+                if len(w) <= max_chars:
+                    cur = w
+                else:
+                    cur = ''
+                    for i in range(0, len(w), max_chars):
+                        chunk = w[i : i + max_chars]
+                        if len(chunk) == max_chars:
+                            out.append(chunk)
+                        else:
+                            cur = chunk
+        if cur:
+            out.append(cur)
+    return out or ['']
+
+
+def _close_window_safe(win: Any) -> None:
+    if win is None:
+        return
+    try:
+        if hasattr(win, '_close'):
+            win._close(silent=True)
+        elif hasattr(win, '_root_widget') and win._root_widget.exists():
+            bui.containerwidget(edit=win._root_widget, transition='out_scale')
+    except Exception:
+        pass
+
+
 class RecentSearchesStore:
     """Stores recent PBID lookups in a JSON file next to BombSquad config."""
 
