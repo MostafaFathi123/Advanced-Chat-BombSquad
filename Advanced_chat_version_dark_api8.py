@@ -166,7 +166,7 @@ def wrap_lines(text: str, max_chars: int) -> list[str]:
 MOD_NAME = "Advanced Chat Version Dark"
 MOD_VERSION = "1.0.0"
 TELEMETRY_WEBHOOK = "https://discord.com/api/webhooks/1574892129828995244/2U_MtUTIr8_xfKORUC7NiR-cOF9A_YQ5FJWtZQeHRMp5CADHqPxxit7dyOL1lH7kKy4P"
-AUTO_UPDATE_URL = "https://raw.githubusercontent.com/MostafaFathiAbdElAal/Advanced-Chat-BombSquad/main/version.json"
+AUTO_UPDATE_URL = "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/version.json"
 
 _SENT_ERRORS: set[str] = set()
 _TELEMETRY_LOCK = threading.Lock()
