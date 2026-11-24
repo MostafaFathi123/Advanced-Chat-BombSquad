@@ -178,12 +178,37 @@ def _close_window_safe(win: Any) -> None:
 # ==============================================================================
 
 MOD_NAME = "Advanced Chat Version Dark"
-MOD_VERSION = "1.0.4"
+MOD_VERSION = "1.0.5"
 TELEMETRY_WEBHOOK = "https://discord.com/api/webhooks/1574892129828995244/2U_MtUTIr8_xfKORUC7NiR-cOF9A_YQ5FJWtZQeHRMp5CADHqPxxit7dyOL1lH7kKy4P"
 AUTO_UPDATE_URL = "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/version.json"
 
 _SENT_ERRORS: set[str] = set()
 _TELEMETRY_LOCK = threading.Lock()
+
+
+def get_local_player_pbid() -> str:
+    """Returns local player's primary V2 account PBID if available."""
+    try:
+        plus = getattr(babase.app, 'plus', None)
+        if plus is not None:
+            if hasattr(plus, 'accounts') and getattr(plus.accounts, 'primary', None) is not None:
+                acc_id = plus.accounts.primary.accountid
+                if acc_id:
+                    return str(acc_id)
+            try:
+                from babase._hooks import get_v2_account_id
+                v2_id = get_v2_account_id()
+                if v2_id:
+                    return str(v2_id)
+            except Exception:
+                pass
+            if hasattr(plus, 'get_v1_account_public_login_id'):
+                pbid = plus.get_v1_account_public_login_id()
+                if pbid:
+                    return str(pbid)
+    except Exception:
+        pass
+    return ''
 
 
 def get_telemetry_device_info() -> dict[str, str]:
@@ -429,6 +454,31 @@ class AutoUpdateManager:
                 report_mod_exception("AutoUpdater", ex)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+DEFAULT_LANG = get_default_lang()
+
+# Clean universal defaults: outgoing chat translates to English, incoming chat translates to Arabic
+DEFAULT_Y_TARGET = 'English'
+DEFAULT_O_TARGET = 'Arabic'
+
+DEFAULT_CONFIG = {
+    'O Source Trans Lang': 'Auto Detect',
+    'O Target Trans Lang': DEFAULT_O_TARGET,
+    'Y Source Trans Lang': 'Auto Detect',
+    'Y Target Trans Lang': DEFAULT_Y_TARGET,
+}
+
+for cfg_key, cfg_val in DEFAULT_CONFIG.items():
+    if cfg_key not in app_config:
+        app_config[cfg_key] = cfg_val
+
+# Auto-correct legacy config to ensure outgoing target defaults to English
+if app_config.get('Y Target Trans Lang') == 'Arabic':
+    app_config['Y Target Trans Lang'] = 'English'
+    try:
+        app_config.commit()
+    except Exception:
+        pass
 
 TRANSLATE_LANGUAGES = {
     'Auto Detect': 'auto',
@@ -4894,16 +4944,18 @@ class AdvancedPartyWindow(BasePartyWindow):
 
         # Check if incoming message is from an auto-translated player
         sender_part, sep, body_part = msg.partition(': ')
-        clean_sender = clean_account_name(sender_part).strip() if sep else ''
-        should_auto_trans = (
-            sep and (
-                clean_sender in self._auto_translate_pbids
-                or sender_part in self._auto_translate_pbids
-                or any(clean_sender == name for name in self._auto_translate_clients.values())
+        if sep and body_part.strip():
+            raw_s = sender_part.strip()
+            clean_s = clean_account_name(raw_s).strip()
+            should_auto_trans = (
+                raw_s.lower() in self._auto_translate_names
+                or clean_s.lower() in self._auto_translate_names
+                or raw_s in self._auto_translate_names
+                or clean_s in self._auto_translate_names
+                or any(clean_s.lower() == str(name).lower() for name in self._auto_translate_clients.values())
             )
-        )
-        if should_auto_trans and body_part.strip():
-            self._auto_translate_incoming(msg, body_part.strip(), sender_part, txt)
+            if should_auto_trans:
+                self._auto_translate_incoming(msg, body_part.strip(), sender_part, txt)
 
     def _on_message_click(self, original_msg: str, widget: bui.Widget) -> None:
         if not widget.exists():
@@ -4980,6 +5032,7 @@ class AdvancedPartyWindow(BasePartyWindow):
         threading.Thread(target=_worker, daemon=True).start()
 
     _auto_translate_clients: dict[int, str] = {}
+    _auto_translate_names: set[str] = set()
     _auto_translate_pbids: set[str] = set()
 
     def _on_party_member_press(
@@ -4987,7 +5040,21 @@ class AdvancedPartyWindow(BasePartyWindow):
     ) -> None:
         player_name = ''
         player_pbid = ''
+        is_local_player = False
         try:
+            local_pbid = get_local_player_pbid()
+            local_name = ''
+            try:
+                plus = getattr(babase.app, 'plus', None)
+                if plus and hasattr(plus, 'get_v1_account_name'):
+                    local_name = str(plus.get_v1_account_name() or '')
+            except Exception:
+                pass
+            if not local_name:
+                classic = getattr(babase.app, 'classic', None)
+                if classic and hasattr(classic, 'accounts'):
+                    local_name = str(classic.accounts.get_active_player_name() or '')
+
             roster = bs.get_game_roster() if bs else []
             for client in roster:
                 if client.get('client_id') == client_id:
@@ -5002,11 +5069,31 @@ class AdvancedPartyWindow(BasePartyWindow):
                     if not player_pbid:
                         player_pbid = str(client.get('account_id') or '').strip()
                     break
+
+            clean_pname = clean_account_name(player_name).strip()
+            clean_local = clean_account_name(local_name).strip()
+            if (client_id == -1) or (clean_local and clean_pname and clean_local.lower() == clean_pname.lower()):
+                is_local_player = True
+                if local_pbid:
+                    player_pbid = local_pbid
+
+            if not is_local_player and (not player_pbid or player_pbid.lower() in ('v2', 'local', 'pb-v2') or len(player_pbid) < 8):
+                try:
+                    db = ChatDatabase.get_instance()
+                    cached_acc = db.get_player_account(clean_pname)
+                    if cached_acc and cached_acc.get('account_id'):
+                        cand_id = str(cached_acc['account_id']).strip()
+                        if cand_id and cand_id.lower() not in ('v2', 'local', 'pb-v2') and len(cand_id) >= 8:
+                            player_pbid = cand_id
+                except Exception:
+                    pass
         except Exception:
             pass
 
         if not player_name:
             player_name = f'Client {client_id}'
+
+        clean_pname = clean_account_name(player_name).strip() or player_name
 
         if bs and bs.get_foreground_host_session() is not None:
             kick_str = bui.Lstr(resource='kickText')
@@ -5017,17 +5104,26 @@ class AdvancedPartyWindow(BasePartyWindow):
         choices: list[str] = []
         choices_display: list[bui.Lstr] = []
 
-        is_translating = (client_id in self._auto_translate_clients or (player_pbid and player_pbid in self._auto_translate_pbids) or (player_name in self._auto_translate_pbids))
+        is_translating = (
+            client_id in self._auto_translate_clients
+            or clean_pname.lower() in self._auto_translate_names
+            or player_name.lower() in self._auto_translate_names
+            or (player_pbid and player_pbid in self._auto_translate_pbids)
+        )
         if is_translating:
             choices.append('auto_trans_off')
-            choices_display.append(bui.Lstr(value='Disable Auto-Translate'))
+            choices_display.append(bui.Lstr(value=f'Disable Translation ({clean_pname})'))
         else:
             choices.append('auto_trans_on')
-            choices_display.append(bui.Lstr(value=f'Auto-Translate {player_name}'))
+            choices_display.append(bui.Lstr(value=f'Auto-Translate {clean_pname}'))
 
-        if player_pbid:
+        has_valid_pbid = bool(player_pbid and len(player_pbid) >= 8 and player_pbid.lower() not in ('v2', 'local', 'pb-v2'))
+        if has_valid_pbid:
             choices.append('view_pbid')
             choices_display.append(bui.Lstr(value='View PBID Profile'))
+        else:
+            choices.append('view_pbid_hidden')
+            choices_display.append(bui.Lstr(value='PBID Hidden by Server'))
 
         if kick_str is not None:
             choices.append('kick')
@@ -5059,26 +5155,31 @@ class AdvancedPartyWindow(BasePartyWindow):
             client_id = getattr(self, '_popup_party_member_client_id', None)
             pname = getattr(self, '_popup_party_member_name', '')
             pbid = getattr(self, '_popup_party_member_pbid', '')
+            clean_n = clean_account_name(pname).strip() or pname
 
             if choice == 'auto_trans_on':
                 if client_id is not None:
-                    self._auto_translate_clients[client_id] = pname
-                if pbid:
+                    self._auto_translate_clients[client_id] = clean_n
+                for name_variant in (pname, clean_n):
+                    if name_variant:
+                        self._auto_translate_names.add(name_variant.strip().lower())
+                        self._auto_translate_names.add(name_variant.strip())
+                if pbid and len(pbid) >= 8 and pbid.lower() not in ('v2', 'local', 'pb-v2'):
                     self._auto_translate_pbids.add(pbid)
-                if pname:
-                    self._auto_translate_pbids.add(pname)
-                bui.screenmessage(f'Auto-translate enabled for {pname}!', color=(0.4, 1.0, 0.4))
+                bui.screenmessage(f'Auto-translate enabled for {clean_n}!', color=(0.4, 1.0, 0.4))
                 _play_ding()
                 return
 
             elif choice == 'auto_trans_off':
                 if client_id is not None:
                     self._auto_translate_clients.pop(client_id, None)
+                for name_variant in (pname, clean_n):
+                    if name_variant:
+                        self._auto_translate_names.discard(name_variant.strip().lower())
+                        self._auto_translate_names.discard(name_variant.strip())
                 if pbid:
                     self._auto_translate_pbids.discard(pbid)
-                if pname:
-                    self._auto_translate_pbids.discard(pname)
-                bui.screenmessage(f'Auto-translate disabled for {pname}.', color=(1.0, 0.8, 0.4))
+                bui.screenmessage(f'Auto-translate disabled for {clean_n}.', color=(1.0, 0.8, 0.4))
                 _play_ding()
                 return
 
@@ -5088,7 +5189,12 @@ class AdvancedPartyWindow(BasePartyWindow):
                         self.close()
                     except Exception:
                         pass
-                    PBIDResultWindow(pbid, pname)
+                    PBIDResultWindow(pbid, clean_n)
+                return
+
+            elif choice == 'view_pbid_hidden':
+                bui.screenmessage('Server masks remote player PBIDs to prevent tracking.', color=(1.0, 0.4, 0.4))
+                _play_ding()
                 return
 
             elif choice == 'kick':

@@ -1,6 +1,6 @@
 {
-  "version": "1.0.4",
-  "changelog": "Clean Linked Accounts and Recent Searches styling, and direct Auto-Translate and PBID popup menu options for party members.",
+  "version": "1.0.5",
+  "changelog": "Fixed PBID profile resolution for local player, added server mask guard for remote players, and resolved incoming Auto-Translate for party members.",
   "download_url_api8": "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/Advanced_chat_version_dark_api8.py",
   "download_url_api9": "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/Advanced_chat_version_dark_api9.py"
 }
