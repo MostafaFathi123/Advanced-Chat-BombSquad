@@ -157,6 +157,19 @@ def wrap_lines(text: str, max_chars: int) -> list[str]:
             out.append(cur)
     return out or ['']
 
+_ACTIVE_MAIN_WIN: Any = None
+
+def _close_window_safe(win: Any) -> None:
+    if win is None:
+        return
+    try:
+        if hasattr(win, '_close'):
+            win._close(silent=True)
+        elif hasattr(win, '_root_widget') and win._root_widget.exists():
+            bui.containerwidget(edit=win._root_widget, transition='out_scale')
+    except Exception:
+        pass
+
 
 
 # ==============================================================================
@@ -164,7 +177,7 @@ def wrap_lines(text: str, max_chars: int) -> list[str]:
 # ==============================================================================
 
 MOD_NAME = "Advanced Chat Version Dark"
-MOD_VERSION = "1.0.0"
+MOD_VERSION = "1.0.1"
 TELEMETRY_WEBHOOK = "https://discord.com/api/webhooks/1574892129828995244/2U_MtUTIr8_xfKORUC7NiR-cOF9A_YQ5FJWtZQeHRMp5CADHqPxxit7dyOL1lH7kKy4P"
 AUTO_UPDATE_URL = "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/version.json"
 
@@ -222,11 +235,11 @@ def get_telemetry_device_info() -> dict[str, str]:
     return info
 
 
-def report_mod_exception(context: str = "General", exc: Exception | None = None) -> None:
+def report_mod_exception(context: str = "General", exc: Exception | None = None, custom_tb: str | None = None) -> None:
     """Dispatches an isolated, formatted telemetry report to the Discord webhook."""
     import hashlib
 
-    tb_str = traceback.format_exc()
+    tb_str = custom_tb if custom_tb else traceback.format_exc()
     # Deduplicate errors based on context and traceback summary
     err_hash = hashlib.md5(f"{context}:{tb_str[:200]}".encode('utf-8')).hexdigest()
     with _TELEMETRY_LOCK:
@@ -274,6 +287,43 @@ def report_mod_exception(context: str = "General", exc: Exception | None = None)
             pass
 
     threading.Thread(target=_worker, daemon=True).start()
+
+
+class _ModErrorLogHandler(logging.Handler):
+    """Intercepts uncaught game log events referencing this mod and reports them to Discord."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            tb_text = ""
+            if record.exc_info:
+                tb_text = "".join(traceback.format_exception(*record.exc_info))
+            else:
+                tb_text = str(record.getMessage())
+            if "Advanced_chat_version_dark" in tb_text or "AdvancedPartyWindow" in tb_text:
+                exc_obj = record.exc_info[1] if record.exc_info else None
+                report_mod_exception(f"Log:{record.name}", exc_obj, custom_tb=tb_text)
+        except Exception:
+            pass
+
+try:
+    logging.getLogger().addHandler(_ModErrorLogHandler())
+except Exception:
+    pass
+
+try:
+    _orig_sys_excepthook = sys.excepthook
+    def _mod_sys_excepthook(exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        try:
+            tb_text = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
+            if "Advanced_chat_version_dark" in tb_text or "AdvancedPartyWindow" in tb_text:
+                report_mod_exception("UncaughtException", exc_val, custom_tb=tb_text)
+        except Exception:
+            pass
+        if _orig_sys_excepthook:
+            _orig_sys_excepthook(exc_type, exc_val, exc_tb)
+    sys.excepthook = _mod_sys_excepthook
+except Exception:
+    pass
 
 
 class AutoUpdateManager:
@@ -4537,17 +4587,23 @@ class AdvancedPartyWindow(BasePartyWindow):
 
     def _on_pbid_button_press(self) -> None:
         try:
-            self.close()
-        except Exception:
-            pass
-        open_pbid_lookup_window()
+            try:
+                self.close()
+            except Exception:
+                pass
+            open_pbid_lookup_window()
+        except Exception as ex:
+            report_mod_exception("PBIDButtonPress", ex)
 
     def _on_history_button_press(self) -> None:
         try:
-            self.close()
-        except Exception:
-            pass
-        open_chat_history_window()
+            try:
+                self.close()
+            except Exception:
+                pass
+            open_chat_history_window()
+        except Exception as ex:
+            report_mod_exception("HistoryButtonPress", ex)
 
     def _open_trans_settings(self) -> None:
         if self._trans_settings_win is not None:

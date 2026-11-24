@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "changelog": "Initial release of Advanced Chat Version Dark featuring Translation, Server Chat History, PBID Account Dossier Lookup, and Discord Error Telemetry.",
+  "version": "1.0.1",
+  "changelog": "Fixed PBIDLookupWindow initialization and added global uncaught exception logging to Discord telemetry.",
   "download_url_api8": "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/Advanced_chat_version_dark_api8.py",
   "download_url_api9": "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/Advanced_chat_version_dark_api9.py"
 }
