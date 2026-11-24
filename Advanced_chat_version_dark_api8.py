@@ -158,6 +158,7 @@ def wrap_lines(text: str, max_chars: int) -> list[str]:
     return out or ['']
 
 _ACTIVE_MAIN_WIN: Any = None
+_ACTIVE_SUB_WIN: Any = None
 
 def _close_window_safe(win: Any) -> None:
     if win is None:
@@ -177,7 +178,7 @@ def _close_window_safe(win: Any) -> None:
 # ==============================================================================
 
 MOD_NAME = "Advanced Chat Version Dark"
-MOD_VERSION = "1.0.1"
+MOD_VERSION = "1.0.2"
 TELEMETRY_WEBHOOK = "https://discord.com/api/webhooks/1574892129828995244/2U_MtUTIr8_xfKORUC7NiR-cOF9A_YQ5FJWtZQeHRMp5CADHqPxxit7dyOL1lH7kKy4P"
 AUTO_UPDATE_URL = "https://raw.githubusercontent.com/MostafaFathi123/Advanced-Chat-BombSquad/main/version.json"
 
@@ -208,21 +209,30 @@ def get_telemetry_device_info() -> dict[str, str]:
         pass
 
     try:
-        classic = getattr(babase.app, 'classic', None)
-        if classic is not None:
-            if hasattr(classic, 'accounts'):
-                info['player_name'] = str(classic.accounts.get_active_player_name() or 'Unknown')
-            if hasattr(classic, 'get_v1_account_display_string'):
-                info['v2_name'] = str(classic.get_v1_account_display_string() or 'Unknown')
+        plus = getattr(babase.app, 'plus', None)
+        if plus is not None:
+            if hasattr(plus, 'get_v1_account_public_login_id'):
+                pbid = plus.get_v1_account_public_login_id()
+                if pbid:
+                    info['pbid'] = str(pbid)
+            if hasattr(plus, 'get_v1_account_name'):
+                acc_name = plus.get_v1_account_name()
+                if acc_name:
+                    info['player_name'] = str(acc_name)
+            if hasattr(plus, 'get_v1_account_display_string'):
+                v2_name = plus.get_v1_account_display_string()
+                if v2_name:
+                    info['v2_name'] = str(v2_name)
     except Exception:
         pass
 
     try:
-        plus = getattr(babase.app, 'plus', None)
-        if plus is not None and hasattr(plus, 'get_v1_account_public_login_id'):
-            pbid = plus.get_v1_account_public_login_id()
-            if pbid:
-                info['pbid'] = str(pbid)
+        classic = getattr(babase.app, 'classic', None)
+        if classic is not None and hasattr(classic, 'accounts'):
+            if info['player_name'] == 'Unknown':
+                pname = classic.accounts.get_active_player_name()
+                if pname:
+                    info['player_name'] = str(pname)
     except Exception:
         pass
 
